@@ -1,0 +1,23 @@
+# project specific
+*.log
+*.zip
+*.json
+
+#  Local .terraform directories
+*.terraform/
+
+# MacOS
+.DS_Store
+
+# vscode
+.vscode
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+
+# .tfvars files
+*.tfvars
+
+# ignore this file
+!tfmodule-template.tf
