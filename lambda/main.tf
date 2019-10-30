@@ -1,7 +1,4 @@
 
-data "aws_region" "current" {}
-data "aws_caller_identity" "current" {}
-
 #########################################
 #    LAMBDA
 #########################################
@@ -123,38 +120,26 @@ resource "aws_api_gateway_integration" "event_listener" {
     "application/x-www-form-urlencoded" = local.request_template
   }
 
-  uri = "arn:aws:apigateway:${data.aws_region.current.name}:lambda:path/2015-03-31/functions/${module.slack_listener_lambda.function_invoke_arn}"
+  uri = module.slack_listener_lambda.function_invoke_arn
 
   passthrough_behavior = "WHEN_NO_TEMPLATES"
 }
 
-locals {
-  function_name = module.slack_listener_lambda.function_name
-  source_arn    = "arn:aws:execute-api:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:${aws_api_gateway_rest_api.api.id}/*/${aws_api_gateway_method.event_listener_post.http_method}${aws_api_gateway_resource.event_listener.path}"
+resource "aws_lambda_permission" "apigw_lambda" {
+  depends_on = [
+    aws_api_gateway_integration.event_listener,
+    aws_api_gateway_rest_api.api,
+    aws_api_gateway_method.event_listener_post,
+    aws_api_gateway_resource.event_listener
+  ]
+
+  statement_id  = "AllowExecutionFromAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = "${module.slack_listener_lambda.function_name}"
+  principal     = "apigateway.amazonaws.com"
+
+  source_arn = "${aws_api_gateway_rest_api.api.execution_arn}/*/${aws_api_gateway_method.event_listener_post.http_method}${aws_api_gateway_resource.event_listener.path}"
 }
-
-resource "null_resource" "lambda_iam_resource" {
-  provisioner "local-exec" {
-    command = "bin/apply_lambda_resource_policy.sh ${local.function_name} ${local.source_arn}"
-  }
-}
-
-# resource "aws_lambda_permission" "apigw_lambda" {
-#   depends_on = [
-#     aws_api_gateway_integration.event_listener,
-#     aws_api_gateway_rest_api.api,
-#     aws_api_gateway_method.event_listener_post,
-#     aws_api_gateway_resource.event_listener
-#   ]
-
-#   statement_id  = "AllowExecutionFromAPIGateway"
-#   action        = "lambda:InvokeFunction"
-#   function_name = "${module.slack_listener_lambda.function_name}"
-#   principal     = "apigateway.amazonaws.com"
-
-#   # More: http://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-control-access-using-iam-policies-to-invoke-api.html
-#   source_arn = "arn:aws:execute-api:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:${aws_api_gateway_rest_api.api.id}/*/${aws_api_gateway_method.event_listener_post.http_method}${aws_api_gateway_resource.event_listener.path}"
-# }
 
 resource "aws_api_gateway_method_response" "event_listener_response_200" {
   rest_api_id = "${aws_api_gateway_rest_api.api.id}"
