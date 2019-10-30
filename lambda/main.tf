@@ -60,9 +60,6 @@ resource "aws_iam_policy_attachment" "api_gw" {
   policy_arn = "${aws_iam_policy.api_gw.arn}"
 }
 
-# Create the api
-# largely stolen from here:
-# https://aws.amazon.com/blogs/compute/implementing-serverless-manual-approval-steps-in-aws-step-functions-and-amazon-api-gateway/
 resource "aws_api_gateway_rest_api" "api" {
   name        = "${var.project_name}-api"
   description = "Lambda Async test"
@@ -82,31 +79,30 @@ resource "aws_api_gateway_method" "event_listener_post" {
 }
 
 locals {
-  request_template = <<TEMPLATE
-#set($allParams = $input.params())
-{
-"body-json" : $input.json('$'),
-"params" : {
-#foreach($type in $allParams.keySet())
+  request_template = <<-TEMPLATE
+    #set($allParams = $input.params())
+    {
+    "body-json" : $input.json('$'),
+    "params" : {
+    #foreach($type in $allParams.keySet())
     #set($params = $allParams.get($type))
-"$type" : {
-    #foreach($paramName in $params.keySet())
-    "$paramName" : "$util.escapeJavaScript($params.get($paramName))"
+    "$type" : {
+        #foreach($paramName in $params.keySet())
+        "$paramName" : "$util.escapeJavaScript($params.get($paramName))"
+            #if($foreach.hasNext),#end
+        #end
+    }
         #if($foreach.hasNext),#end
     #end
-}
-    #if($foreach.hasNext),#end
-#end
-},
-"stage-variables" : {
-#foreach($key in $stageVariables.keySet())
-"$key" : "$util.escapeJavaScript($stageVariables.get($key))"
-    #if($foreach.hasNext),#end
-#end
-}
-}
-TEMPLATE
-
+    },
+    "stage-variables" : {
+      #foreach($key in $stageVariables.keySet())
+      "$key" : "$util.escapeJavaScript($stageVariables.get($key))"
+          #if($foreach.hasNext),#end
+      #end
+    }
+    }
+    TEMPLATE
 }
 
 resource "aws_api_gateway_integration" "event_listener" {
@@ -132,22 +128,33 @@ resource "aws_api_gateway_integration" "event_listener" {
   passthrough_behavior = "WHEN_NO_TEMPLATES"
 }
 
-resource "aws_lambda_permission" "apigw_lambda" {
-  depends_on = [
-    aws_api_gateway_integration.event_listener,
-    aws_api_gateway_rest_api.api,
-    aws_api_gateway_method.event_listener_post,
-    aws_api_gateway_resource.event_listener
-  ]
-
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = "${module.slack_listener_lambda.function_name}"
-  principal     = "apigateway.amazonaws.com"
-
-  # More: http://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-control-access-using-iam-policies-to-invoke-api.html
-  source_arn = "arn:aws:execute-api:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:${aws_api_gateway_rest_api.api.id}/*/${aws_api_gateway_method.event_listener_post.http_method}${aws_api_gateway_resource.event_listener.path}"
+locals {
+  function_name = module.slack_listener_lambda.function_name
+  source_arn    = "arn:aws:execute-api:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:${aws_api_gateway_rest_api.api.id}/*/${aws_api_gateway_method.event_listener_post.http_method}${aws_api_gateway_resource.event_listener.path}"
 }
+
+resource "null_resource" "lambda_iam_resource" {
+  provisioner "local-exec" {
+    command = "bin/apply_lambda_resource_policy.sh ${local.function_name} ${local.source_arn}"
+  }
+}
+
+# resource "aws_lambda_permission" "apigw_lambda" {
+#   depends_on = [
+#     aws_api_gateway_integration.event_listener,
+#     aws_api_gateway_rest_api.api,
+#     aws_api_gateway_method.event_listener_post,
+#     aws_api_gateway_resource.event_listener
+#   ]
+
+#   statement_id  = "AllowExecutionFromAPIGateway"
+#   action        = "lambda:InvokeFunction"
+#   function_name = "${module.slack_listener_lambda.function_name}"
+#   principal     = "apigateway.amazonaws.com"
+
+#   # More: http://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-control-access-using-iam-policies-to-invoke-api.html
+#   source_arn = "arn:aws:execute-api:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:${aws_api_gateway_rest_api.api.id}/*/${aws_api_gateway_method.event_listener_post.http_method}${aws_api_gateway_resource.event_listener.path}"
+# }
 
 resource "aws_api_gateway_method_response" "event_listener_response_200" {
   rest_api_id = "${aws_api_gateway_rest_api.api.id}"
